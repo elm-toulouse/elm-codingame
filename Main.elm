@@ -27,66 +27,112 @@ main =
         , stderr = stderr
         }
         { init = init
-        , turn = turn
+        , turn =
+            \value state ->
+                case Decode.decodeValue decodeTurnData value of
+                    Err err ->
+                        -- Should not happen once we've written the decoder correctly
+                        ( state
+                        , ""
+                        , Just (Decode.errorToString err)
+                        )
+
+                    Ok turnData ->
+                        turn turnData state
         }
 
 
 type alias GameState =
-    { turnCount : Int
-    , nodeCount : Int
-    , linkCount : Int
-    , exitCount : Int
-    , links : List ( Int, Int )
-    , exits : List Int
+    { settings : InitData
     }
 
 
 defaultGameState : GameState
 defaultGameState =
-    { turnCount = 0
-    , nodeCount = 0
-    , linkCount = 0
-    , exitCount = 0
-    , links = []
-    , exits = []
+    { settings =
+        { numberOfCells = 0
+        , cells = []
+        }
     }
 
 
 type alias InitData =
-    { nodeCount : Int
-    , linkCount : Int
-    , exitCount : Int
-    , links : List ( Int, Int )
-    , exits : List Int
+    { numberOfCells : Int
+    , cells : List Cell
     }
+
+
+type alias Cell =
+    { index : Int
+    , richness : Int
+    }
+
+
+decodeInitData : Decoder InitData
+decodeInitData =
+    Decode.map2 InitData
+        (Decode.field "numberOfCells" Decode.int)
+        (Decode.field "cells" (Decode.list decodeCell))
+
+
+decodeCell : Decoder { index : Int, richness : Int }
+decodeCell =
+    Decode.map2 Cell
+        (Decode.field "index" Decode.int)
+        (Decode.field "richness" Decode.int)
 
 
 type alias TurnData =
-    { skynetNode : Int
+    { day : Int
+    , nutrients : Int
+    , me : Player
+    , other : Player
+    , trees : List Tree
+    , possibleActions : List String
     }
 
 
-initDataDecoder : Decoder InitData
-initDataDecoder =
-    Decode.map5 InitData
-        (Decode.field "nodeCount" Decode.int)
-        (Decode.field "linkCount" Decode.int)
-        (Decode.field "exitCount" Decode.int)
-        (Decode.field "links" (Decode.list (pairDecoder Decode.int Decode.int)))
-        (Decode.field "exits" (Decode.list Decode.int))
+type alias Player =
+    { sun : Int
+    , score : Int
+    , asleep : Bool
+    }
 
 
-pairDecoder : Decoder a -> Decoder b -> Decoder ( a, b )
-pairDecoder decA decB =
-    Decode.map2 Tuple.pair
-        (Decode.index 0 decA)
-        (Decode.index 1 decB)
+type alias Tree =
+    { index : Int
+    , size : Int
+    , isMine : Bool
+    , isDormant : Bool
+    }
 
 
-turnDataDecoder : Decoder TurnData
-turnDataDecoder =
-    Decode.map TurnData
-        (Decode.field "skynetNode" Decode.int)
+decodeTurnData : Decoder TurnData
+decodeTurnData =
+    Decode.map6 TurnData
+        (Decode.field "day" Decode.int)
+        (Decode.field "nutrients" Decode.int)
+        (Decode.field "me" decodePlayer)
+        (Decode.field "other" decodePlayer)
+        (Decode.field "trees" (Decode.list decodeTree))
+        (Decode.field "possibleActions" (Decode.list Decode.string))
+
+
+decodePlayer : Decoder Player
+decodePlayer =
+    Decode.map3 Player
+        (Decode.field "sun" Decode.int)
+        (Decode.field "score" Decode.int)
+        (Decode.field "asleep" Decode.bool)
+
+
+decodeTree : Decoder Tree
+decodeTree =
+    Decode.map4 Tree
+        (Decode.field "index" Decode.int)
+        (Decode.field "size" Decode.int)
+        (Decode.field "isMine" Decode.bool)
+        (Decode.field "isDormant" Decode.bool)
 
 
 {-| Function called at the game initialization.
@@ -94,37 +140,25 @@ The string contains initial game data.
 -}
 init : Value -> ( GameState, Maybe String )
 init value =
-    case Decode.decodeValue initDataDecoder value of
+    case Decode.decodeValue decodeInitData value of
         Err err ->
             -- Should not happen once we've written the decoder correctly
             ( defaultGameState, Just (Decode.errorToString err) )
 
         Ok initData ->
-            ( { turnCount = 0
-              , nodeCount = initData.nodeCount
-              , linkCount = initData.linkCount
-              , exitCount = initData.exitCount
-              , links = initData.links
-              , exits = initData.exits
-              }
+            ( { settings = initData }
             , Just "Initialization done!"
             )
 
 
 {-| Function called during the game loop with the data of the current turn.
 -}
-turn : Value -> GameState -> ( GameState, String, Maybe String )
-turn value state =
-    case Decode.decodeValue turnDataDecoder value of
-        Err err ->
-            -- Should not happen once we've written the decoder correctly
-            ( { state | turnCount = state.turnCount + 1 }
-            , ""
-            , Just (Decode.errorToString err)
-            )
-
-        Ok turnData ->
-            ( { state | turnCount = state.turnCount + 1 }
-            , "1 2"
-            , Nothing
-            )
+turn : TurnData -> GameState -> ( GameState, String, Maybe String )
+turn turnData state =
+    ( state
+    , turnData.possibleActions
+        |> List.reverse
+        |> List.head
+        |> Maybe.withDefault "WAIT"
+    , Just <| String.join " " turnData.possibleActions
+    )
